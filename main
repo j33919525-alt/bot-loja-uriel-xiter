@@ -1,0 +1,140 @@
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, ChannelType } = require('discord.js');
+
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.DirectMessages
+    ]
+});
+
+// ⚙️ SUAS CONFIGURAÇÕES
+const PREFIXO = '!';
+const TOKEN = 'MTUxMTAxNTgxMzEyMDAwMDE1Mg.G1jS5o.BFbtzz38JEf06JWSWuU8q5Ui4DQGPBXgtJXkJc';
+const DONO_ID = '135860143729016849';
+
+// 💰 PIX
+let formasPagamento = { 'PIX': { chave: '8299472659', nome: 'URiEL XITER' } };
+
+// 📦 DADOS
+let produtos = [];
+let pedidos = [];
+let chaves = [];
+let proxIdProduto = 1;
+let proxIdPedido = 1;
+
+// 🟢 BOT ONLINE
+client.on('ready', () => {
+    console.log(`✅ BOT URiEL XITER ONLINE: ${client.user.tag}`);
+    client.user.setActivity('URiEL XITER | LOJA OFICIAL', { type: 'PLAYING' });
+});
+
+// 📝 COMANDOS
+client.on('messageCreate', async message => {
+    if (message.author.bot || !message.content.startsWith(PREFIXO)) return;
+
+    const args = message.content.slice(PREFIXO.length).trim().split(/ +/);
+    const comando = args.shift().toLowerCase();
+
+    // 🛒 ADICIONAR PRODUTO
+    if (comando === 'adicionarproduto') {
+        if (message.author.id !== DONO_ID) return message.reply('❌ Apenas o dono pode usar!');
+        const dados = message.content.slice(PREFIXO.length + comando.length).split('|').map(i => i.trim());
+        if (dados.length < 4) return message.reply('⚠️ Use: !adicionarproduto Nome | Preço | Descrição | Entrega');
+        
+        produtos.push({ id: proxIdProduto++, nome: dados[0], preco: dados[1], descricao: dados[2], entrega: dados[3], estoque: 0 });
+        return message.reply(`✅ Produto cadastrado! ID: ${proxIdProduto - 1}`);
+    }
+
+    // 🔑 ADICIONAR CHAVE
+    if (comando === 'adicionarchave') {
+        if (message.author.id !== DONO_ID) return;
+        
+        const idProduto = parseInt(args[0]);
+        const conteudoChave = args.slice(1).join(' ');
+        const produto = produtos.find(p => p.id === idProduto);
+
+        if (!produto) return message.reply('❌ Produto não encontrado!');
+        if (!conteudoChave) return message.reply('⚠️ Escreva a chave corretamente!');
+
+        chaves.push({ produtoId: idProduto, valor: conteudoChave, usada: false });
+        produto.estoque++;
+        return message.reply(`🔑 Chave adicionada! Estoque: ${produto.estoque}`);
+    }
+
+    // 🛒 VER LOJA
+    if (comando === 'loja') {
+        if (produtos.length === 0) return message.reply('📭 Nenhum produto cadastrado!');
+        const emb = new EmbedBuilder().setTitle('🛒 LOJA URiEL XITER').setColor('#9B59B6');
+        produtos.forEach(p => emb.addFields({name: `ID ${p.id} | ${p.nome} - ${p.preco}`, value: `${p.descricao}\n📦 Estoque: ${p.estoque}`}));
+        return message.reply({ embeds: [emb] });
+    }
+
+    // 💳 COMPRAR
+    if (comando === 'comprar') {
+        const id = parseInt(args[0]);
+        const produto = produtos.find(p => p.id === idProduto);
+        if (!produto) return message.reply('❌ Produto inválido!');
+        if (produto.estoque <= 0) return message.reply('❌ Esgotado!');
+
+        const pedido = { id: proxIdPedido++, user: message.author.tag, userId: message.author.id, produto: produto.nome, status: 'PENDENTE' };
+        pedidos.push(pedido);
+
+        let msg = `🛒 **PEDIDO #${pedido.id}**\nProduto: ${produto.nome}\nValor: ${produto.preco}\n\n💳 PAGAMENTO:\nPIX: \`8299472659\`\nNome: URiEL XITER\n\nEnvie o comprovante aqui!`;
+        try { await message.author.send(msg); return message.reply('✅ Verifique sua mensagem privada!'); }
+        catch { return message.reply('❌ Habilite mensagens diretas!'); }
+    }
+
+    // 📦 ENTREGAR
+    if (comando === 'entregar') {
+        if (message.author.id !== DONO_ID) return;
+        const id = parseInt(args[0]);
+        const ped = pedidos.find(p => p.id === id);
+        if (!ped) return message.reply('❌ Pedido não encontrado!');
+        if (ped.status === 'ENTREGUE') return message.reply('⚠️ Já entregue!');
+
+        const produto = produtos.find(p => p.nome === ped.produto);
+        const chave = chaves.find(c => c.produtoId === produto.id && !c.usada);
+        if (!chave) return message.reply('❌ Sem chave disponível!');
+
+        chave.usada = true; produto.estoque--; ped.status = 'ENTREGUE';
+        const usuario = await client.users.fetch(ped.userId);
+        await usuario.send(`🎉 **ENTREGA**\nProduto: ${produto.nome}\n🔑 Chave: \`${chave.valor}\`\n✅ Obrigado pela compra!`);
+        return message.reply(`✅ Entregue para ${ped.user}!`);
+    }
+
+    // 🎫 TICKET
+    if (comando === 'ticket') {
+        const canal = await message.guild.channels.create({
+            name: `atendimento-${message.author.username}`,
+            type: ChannelType.GuildText,
+            permissionOverwrites: [
+                { id: message.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                { id: message.author.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+                { id: DONO_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.ManageChannels] }
+            ]
+        });
+        await canal.send(`Olá ${message.author}! Explique seu problema ou dúvida aqui.`);
+        return message.reply(`✅ Atendimento aberto: ${canal}`);
+    }
+
+    // ❌ FECHAR TICKET
+    if (comando === 'fechar') {
+        if (message.channel.name.startsWith('atendimento-')) await message.channel.delete();
+    }
+
+    // 📊 ESTATÍSTICAS
+    if (comando === 'estatisticas') {
+        if (message.author.id !== DONO_ID) return;
+        const emb = new EmbedBuilder().setTitle('📊 ESTATÍSTICAS DA LOJA').addFields(
+            {name: 'Produtos Cadastrados', value: `${produtos.length}`, inline:true},
+            {name: 'Total de Vendas', value: `${pedidos.length}`, inline:true},
+            {name: 'Chaves Disponíveis', value: `${chaves.filter(c=>!c.usada).length}`, inline:true}
+        );
+        return message.reply({ embeds: [emb] });
+    }
+});
+
+client.login(TOKEN);
